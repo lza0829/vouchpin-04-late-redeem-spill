@@ -23,10 +23,13 @@ def preview(business_day: str | None = None) -> dict[str, Any]:
         day = business_day or settings_repo.get(conn, "business_day")
         opens = fact_repo.open_facts_for_day(conn, day)
         total = round(sum(float(f["amount"]) for f in opens), 2)
+        rt_count, rt_total = fact_repo.retarget_stats(opens)
         return {
             "business_day": day,
             "open_count": len(opens),
             "open_total": total,
+            "retarget_open_count": rt_count,
+            "retarget_open_total": rt_total,
             "already_sealed": fact_repo.day_is_sealed(conn, day),
             "facts": opens,
         }
@@ -44,12 +47,15 @@ def seal(body: dict[str, Any]) -> dict[str, Any]:
         if not opens:
             raise HTTPException(400, "无可钉扎的 open 核销事实")
         total = round(sum(float(f["amount"]) for f in opens), 2)
+        rt_count, rt_total = fact_repo.retarget_stats(opens)
         bid = batch_repo.create_batch(
             conn,
             business_day=day,
             status="sealed",
             fact_count=len(opens),
             total_amount=total,
+            retarget_count=rt_count,
+            retarget_amount=rt_total,
             sealed_at=datetime.now().replace(microsecond=0).isoformat(),
             note=body.get("note") or "",
         )
@@ -60,6 +66,8 @@ def seal(body: dict[str, Any]) -> dict[str, Any]:
             "business_day": day,
             "fact_count": len(opens),
             "total_amount": total,
+            "retarget_count": rt_count,
+            "retarget_amount": rt_total,
             "status": "sealed",
         }
     finally:

@@ -16,7 +16,7 @@ def list_events(conn: sqlite3.Connection, business_day: str | None = None) -> li
 
 def insert_event(conn: sqlite3.Connection, **fields: Any) -> int:
     cur = conn.execute(
-        "INSERT INTO coupon_events(event_type, coupon_code, campaign_code, amount, business_day, occurred_at, note) VALUES(?,?,?,?,?,?,?)",
+        "INSERT INTO coupon_events(event_type, coupon_code, campaign_code, amount, business_day, occurred_at, note, retarget_from) VALUES(?,?,?,?,?,?,?,?)",
         (
             fields["event_type"],
             fields["coupon_code"],
@@ -25,6 +25,7 @@ def insert_event(conn: sqlite3.Connection, **fields: Any) -> int:
             fields["business_day"],
             fields["occurred_at"],
             fields.get("note") or "",
+            fields.get("retarget_from"),
         ),
     )
     return int(cur.lastrowid)

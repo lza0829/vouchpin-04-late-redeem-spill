@@ -15,6 +15,7 @@ async function seal() {
   try {
     const r = await api.seal({})
     msg.value = `已钉扎批次 #${r.batch_id} · ${r.fact_count} 笔 · 合计 ${r.total_amount}`
+      + (r.retarget_count ? ` · 其中改挂 ${r.retarget_count} 笔 / ${r.retarget_amount}` : '')
     await load()
   } catch (e) { err.value = e.message }
 }
@@ -26,6 +27,7 @@ onMounted(load)
       <div class="stat"><div class="k">业务日</div><div class="v">{{ preview.business_day }}</div></div>
       <div class="stat"><div class="k">待钉笔数</div><div class="v ticket">{{ preview.open_count }}</div></div>
       <div class="stat"><div class="k">待钉合计</div><div class="v ticket">{{ preview.open_total }}</div></div>
+      <div class="stat"><div class="k">其中改挂</div><div class="v">{{ preview.retarget_open_count }} 笔 / {{ preview.retarget_open_total }}</div></div>
       <div class="stat"><div class="k">已钉扎</div><div class="v">{{ preview.already_sealed ? '是' : '否' }}</div></div>
     </div>
     <div class="row">
@@ -37,13 +39,14 @@ onMounted(load)
   </div>
   <div class="panel">
     <table>
-      <thead><tr><th>事实ID</th><th>券码</th><th>活动</th><th>金额</th><th>状态</th></tr></thead>
+      <thead><tr><th>事实ID</th><th>券码</th><th>活动</th><th>金额</th><th>改挂自</th><th>状态</th></tr></thead>
       <tbody>
         <tr v-for="f in (preview?.facts || [])" :key="f.id">
           <td>{{ f.id }}</td>
           <td>{{ f.coupon_code }}</td>
           <td>{{ f.campaign_code }}</td>
           <td>{{ f.amount }}</td>
+          <td><span class="tag warn" v-if="f.retarget_from">{{ f.retarget_from }}</span><span v-else>—</span></td>
           <td><span class="tag warn">{{ f.status }}</span></td>
         </tr>
       </tbody>

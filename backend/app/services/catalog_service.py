@@ -16,11 +16,13 @@ def dashboard() -> dict[str, Any]:
         sealed_n = sum(1 for f in facts if f["status"] == "sealed")
         total = round(sum(float(f["amount"]) for f in facts), 2)
         events = event_repo.list_events(conn, day)
+        retarget_events = sum(1 for e in events if e.get("retarget_from"))
         batches = batch_repo.list_batches(conn)
         sealed_today = fact_repo.day_is_sealed(conn, day)
         return {
             "business_day": day,
             "event_count": len(events),
+            "retarget_event_count": retarget_events,
             "fact_count": len(facts),
             "open_fact_count": open_n,
             "sealed_fact_count": sealed_n,

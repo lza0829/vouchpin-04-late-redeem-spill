@@ -1,5 +1,5 @@
 from __future__ import annotations
-from datetime import datetime
+from datetime import date, datetime
 from typing import Any
 from fastapi import HTTPException
 from app.db import connect
@@ -26,10 +26,38 @@ def list_events(business_day: str | None = None) -> list[dict[str, Any]]:
         conn.close()
 
 
+def _requested_day(conn, body: dict[str, Any]) -> str:
+    """落库归属（三处同源的源头）：显式 business_day > occurred_at 当日 > 当前业务日。"""
+    day = (body.get("business_day") or "").strip()
+    if day:
+        return day
+    occurred = (body.get("occurred_at") or "").strip()
+    if occurred:
+        return occurred[:10]
+    return settings_repo.get(conn, "business_day")
+
+
+def _gate_redeem_day(conn, requested: str) -> tuple[str, str | None]:
+    """日闸：目标日已钉则不写入该日，改挂到 [目标日, 当前业务日] 内最早开放日。
+
+    返回 (落库日, retarget_from)；无开放日则 409，什么都不写。
+    调用方须持有 BEGIN IMMEDIATE 事务，使检查与写入相对并发钉扎互斥。
+    """
+    if not fact_repo.day_is_sealed(conn, requested):
+        return requested, None
+    today = settings_repo.get(conn, "business_day")
+    open_day = fact_repo.earliest_open_day(conn, requested, today)
+    if open_day is None:
+        raise HTTPException(
+            409,
+            f"业务日 {requested} 已钉扎，且至当前业务日 {today} 无开放日可改挂，核销未写入",
+        )
+    return open_day, requested
+
+
 def add_event(body: dict[str, Any]) -> dict[str, Any]:
     conn = connect(immediate=True)
     try:
-        day = body.get("business_day") or settings_repo.get(conn, "business_day")
         et = body.get("event_type")
         if et not in {"issue", "redeem", "void"}:
             raise HTTPException(400, "event_type 须为 issue/redeem/void")
@@ -37,8 +65,16 @@ def add_event(body: dict[str, Any]) -> dict[str, Any]:
         camp = (body.get("campaign_code") or "").strip()
         if not code or not camp:
             raise HTTPException(400, "coupon_code / campaign_code 必填")
-        if et == "redeem" and fact_repo.day_is_sealed(conn, day):
-            raise HTTPException(409, f"业务日 {day} 核销已钉扎，禁止再写入核销")
+        requested = _requested_day(conn, body)
+        try:
+            date.fromisoformat(requested)
+        except ValueError:
+            raise HTTPException(400, f"落库业务日格式非法（须 YYYY-MM-DD）: {requested!r}")
+        retarget_from = None
+        if et == "redeem":
+            day, retarget_from = _gate_redeem_day(conn, requested)
+        else:
+            day = requested
         amount = float(body.get("amount") or 0)
         if et == "redeem" and amount <= 0:
             # default face value from campaign
@@ -55,6 +91,7 @@ def add_event(body: dict[str, Any]) -> dict[str, Any]:
             business_day=day,
             occurred_at=occurred,
             note=body.get("note") or "",
+            retarget_from=retarget_from,
         )
         fact_id = None
         if et == "redeem":
@@ -67,10 +104,18 @@ def add_event(body: dict[str, Any]) -> dict[str, Any]:
                     business_day=day,
                     event_id=eid,
                     status="open",
+                    retarget_from=retarget_from,
                 )
             except Exception as e:
                 raise HTTPException(409, f"核销事实写入失败（可能券码已核销）: {e}") from e
         conn.commit()
-        return {"event_id": eid, "fact_id": fact_id, "business_day": day}
+        return {
+            "event_id": eid,
+            "fact_id": fact_id,
+            "business_day": day,
+            "occurred_at": occurred,
+            "retargeted": retarget_from is not None,
+            "retarget_from": retarget_from,
+        }
     finally:
         conn.close()
